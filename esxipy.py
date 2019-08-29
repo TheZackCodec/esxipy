@@ -1,7 +1,18 @@
 import os
+import git
 import json
 import traceback
 from pyVim.connect import SmartConnect, SmartConnectNoSSL, Disconnect
+
+
+def get_vmware_samples():
+    if helper.exists("pyvmomi-community-samples"):
+        print("Updating pyvmomi-community-samples")
+        git.cmd.Git(helper.path_from_src("pyvmomi-community-samples")).pull()
+    else:
+        print("Cloning pyvmomi-community-samples")
+        git.Repo.clone_from("https://github.com/vmware/pyvmomi-community-samples.git",
+                            helper.path_from_src("pyvmomi-community-samples"))
 
 
 class Helper:
@@ -38,7 +49,28 @@ class Helper:
         return dictionary
 
 
+class Connection:
+
+    connection = None
+
+    def connect_No_SSL(self):  # Connects to ESXI without using Secure Sockets Layer
+        self.connection = SmartConnectNoSSL(
+            host=settings_dict["host"], user=settings_dict["username"], pwd=settings_dict["password"])
+
+    def connect_SSL(self):  # Connects to the ESXI server using Secure Sockets Layer
+        self.connection = SmartConnect(
+            host=settings_dict["host"], user=settings_dict["username"], pwd=settings_dict["password"])
+
+    def disconnect(self):
+        if self.connection == None:
+            print("no connection to close")
+        else:
+            print("closing connection")
+            Disconnect(self.connection)
+
+
 helper = Helper()
+settings_dict = helper.get_json_as_dict("settings.json")
 
 
 def main():
@@ -46,9 +78,11 @@ def main():
     try:
         print("\n---------- Starting esxipy ----------\n")
 
-        settings_dict = helper.get_json_as_dict("settings.json")
-        server = SmartConnect(
-            host=settings_dict["host"], user=settings_dict["password"], pwd=settings_dict["password"])
+        get_vmware_samples()
+
+        server = Connection()
+
+        # server.connect_No_SSL()
 
     except KeyboardInterrupt:
         print("\nProgram stopped by user... ")
@@ -61,6 +95,9 @@ def main():
 
     finally:
         print("\n---------- Cleaning up ----------\n")
+
+        print("Disconnecting from server")
+        server.disconnect()
 
         print("\n---------- Clean up complete ----------\n")
 
