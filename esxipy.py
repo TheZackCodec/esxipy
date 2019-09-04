@@ -1,18 +1,10 @@
 import os
+import sys
 import git
 import json
 import traceback
+from pyVim.connect import vim
 from pyVim.connect import SmartConnect, SmartConnectNoSSL, Disconnect
-
-
-def get_vmware_samples():
-    if helper.exists("pyvmomi-community-samples"):
-        print("Updating pyvmomi-community-samples")
-        git.cmd.Git(helper.path_from_src("pyvmomi-community-samples")).pull()
-    else:
-        print("Cloning pyvmomi-community-samples")
-        git.Repo.clone_from("https://github.com/vmware/pyvmomi-community-samples.git",
-                            helper.path_from_src("pyvmomi-community-samples"))
 
 
 class Helper:
@@ -69,8 +61,80 @@ class Connection:
             Disconnect(self.connection)
 
 
+def PrintVmInfo(vm, depth=1):
+    """
+    Print information for a particular virtual machine or recurse into a folder
+    or vApp with depth protection
+    """
+    maxdepth = 10
+
+    # if this is a group it will have children. if it does, recurse into them
+    # and then return
+    if hasattr(vm, 'childEntity'):
+        if depth > maxdepth:
+            return
+        vmList = vm.childEntity
+        for c in vmList:
+            PrintVmInfo(c, depth+1)
+        return
+
+    # if this is a vApp, it likely contains child VMs
+    # (vApps can nest vApps, but it is hardly a common usecase, so ignore that)
+    if isinstance(vm, vim.VirtualApp):
+        vmList = vm.vm
+        for c in vmList:
+            PrintVmInfo(c, depth + 1)
+        return
+
+    summary = vm.summary
+    print("Name       : ", summary.config.name)
+    print("Path       : ", summary.config.vmPathName)
+    print("Guest      : ", summary.config.guestFullName)
+    print("UUID       : ", summary.config.uuid)
+    annotation = summary.config.annotation
+    if annotation != None and annotation != "":
+        print("Annotation : ", annotation)
+    print("State      : ", summary.runtime.powerState)
+    if summary.guest != None:
+        ip = summary.guest.ipAddress
+        if ip != None and ip != "":
+            print("IP         : ", ip)
+    if summary.runtime.question != None:
+        print("Question  : ", summary.runtime.question.text)
+
+    print("")
+
+
+class CLI():
+
+    memory_dict = {}
+
+    def start(self):
+        while True:
+            usr_input = input("\nESXIPY > " + settings_dict["host"] + " > ")
+
+
+            if usr_input == "ls":
+                self.list_vms(False)
+            
+            elif usr_input == "ls -al":
+                self.list_vms(True)
+
+            else:
+                print(usr_input.split())
+
+    def list_vms(self, verbose):
+        for vm in vm_dict.values():
+            print("Name  : ", vm.summary.config.name)
+            if verbose:
+                print("Guest : ", vm.summary.config.guestFullName)
+                print("UUID  : ", vm.summary.config.uuid)
+                print("")
+
+
 helper = Helper()
 settings_dict = helper.get_json_as_dict("settings.json")
+vm_dict = {}
 
 
 def main():
@@ -78,11 +142,23 @@ def main():
     try:
         print("\n---------- Starting esxipy ----------\n")
 
-        get_vmware_samples()
-
         server = Connection()
+        server.connect_No_SSL()
+        print("Succesfully connected to " + settings_dict["host"])
 
-        # server.connect_No_SSL()
+        content = server.connection.RetrieveContent()
+        for datacenter in content.rootFolder.childEntity:
+            print("Checking Datacenter " + str(datacenter) + " for VMs")
+            if hasattr(datacenter, 'vmFolder'):
+                vmFolder = datacenter.vmFolder
+                vmList = vmFolder.childEntity
+                print(str(len(vmList)) + " VMs found!")
+                for vm in vmList:
+                    vm_dict.update({vm.summary.config.name: vm})
+
+        cli = CLI()
+
+        cli.start()
 
     except KeyboardInterrupt:
         print("\nProgram stopped by user... ")
